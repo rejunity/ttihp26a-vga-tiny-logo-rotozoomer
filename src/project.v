@@ -60,9 +60,6 @@ module tt_um_rejunity_vga_logo (
       .addr(cos_addr),
       .data(cos_t)
   );
-  // wire cmp = y_px < 240 ?
-  //     (32'sh0001_0000 + cos_t)>>9 > y_px      :
-  //     (32'sh0001_0000 + sin_t)>>9 > y_px - 240;
 
   wire [7:0] sin_addr = frame[7:0];
   wire [7:0] cos_addr = frame[7:0]+128;
@@ -88,29 +85,20 @@ module tt_um_rejunity_vga_logo (
     end
   end
 
-  wire signed [10:0] x = x_px;
-  wire signed [10:0] y = y_px;
+  // wire signed [10:0] x = x_px;
+  // wire signed [10:0] y = y_px;
   // wire signed [63:0] x_mul_cos = cos_t[0+:16] * x - sin_t[0+:16] * y;
   // wire signed [63:0] y_mul_sin = sin_t[0+:16] * x + cos_t[0+:16] * y;
   // wire signed [63:0] x_px_ = x_mul_cos[14+:9];
   // wire signed [63:0] y_px_ = y_mul_sin[14+:9];
-  // // wire signed [63:0] x_px_ = x_mul_cos[14+:9];
-  // wire signed [63:0] y_px_ = y_mul_sin[14+:9];
-  // wire signed [63:0] x_px_ = x_px_r[15+:16];
-  // wire signed [63:0] y_px_ = y_px_r[15+:16];
-
-  // wire signed [63:0] x_px_ = x_px_acc[15+:16] - y_px_acc[15+:16];
-  // wire signed [63:0] y_px_ = x_px_acc[15+:16] + y_px_acc[15+:16];
 
   wire signed [10:0] rotated_x = (cos_x_acc - sin_y_acc)>>13;
   wire signed [10:0] rotated_y = (sin_x_acc + cos_y_acc)>>13;
   wire               rotated_checkers = rotated_x[10] ^ rotated_y[10];
 
-  // wire [18:0] rot_bg = (cos_x_acc - sin_y_acc)>>9;
-  // wire [18:0] rot_bg = (sin_x_acc + cos_y_acc)>>9;
   wire [31:0] diagonals = cos_x_acc - sin_y_acc - sin_x_acc - cos_y_acc;
   wire [17:0] diagonalsZ = (diagonals[9+:18] << 1) ^ (diagonals[9+:18] >> 1);
-  wire [17:0] rotated_bg = diagonalsZ & {18{rotated_checkers}};
+  wire [17:0] rotated_bg = diagonalsZ;
 
   wire logo;
   tt_logo tt_logo(
@@ -169,33 +157,9 @@ module tt_um_rejunity_vga_logo (
     end 
   endfunction
   
-  reg signed [17:0] bg_at_y0;
-  reg signed [17:0] bg_at_x0;
-  reg signed [17:0] bg;
-  // wire signed  [17:0] bg_inc = {6'b000_000, 6'b111_111, 6'b000_001};
-  wire signed [17:0] bg_inc = $signed({{5'b000_00, ~ui_in[2]} , 6'b111_111, 6'b000_001});
-  always @(posedge clk) begin
-    if (~rst_n) begin
-      bg_at_y0 <= bg_inc*640;
-      bg_at_x0 <= 0;
-      bg <= 0;
-    end else
-    if (x_px == 0) begin
-      if (y_px == 0) begin
-        bg_at_x0 <= bg_inc*640 + bg_at_y0;
-        bg_at_y0 <= rgb18_add(bg_at_y0, -bg_inc*(ui_in[1:0] + 3'b1));
-      end else begin
-        bg_at_x0 <= rgb18_add(bg_at_x0, bg_inc);
-        bg <= bg_at_x0;
-      end
-    end else begin
-      bg <= rgb18_add(bg, bg_inc);
-    end
-  end
-
   wire [5:0] r, g, b;
-  // assign {r, g, b} = logo ? rgb18(63-2) : rotated_bg;
-  assign {r, g, b} = logo ? (rotated_checkers ? rgb18(63):rgb18(63-3)) : rotated_bg;
+  assign {r, g, b} = logo ? (rotated_checkers ? rgb18(63):rgb18(63-3)) :
+                            {18{rotated_checkers}} & rotated_bg;
 
   assign {R, G, B} = 
     ~activevideo ? 0 : { r_dither, g_dither, b_dither };
@@ -211,11 +175,23 @@ module tt_um_rejunity_vga_logo (
 `endif
 endmodule
 
+
 module sine_rom_16_16 (
     input  wire [7:0] addr,       
     output reg  signed [31:0] data
 );
+  wire signed [31:0] half_data;
+  sine_rom_16_16_half sin_lut (
+      .addr(addr[6:0]),
+      .data(half_data)
+  );
+  assign data = addr[7] ? half_data : 32'h0001_0000 - half_data;
+endmodule
 
+module sine_rom_16_16_half (
+    input  wire [6:0] addr,       
+    output reg  signed [31:0] data
+);
     always @* begin
         case (addr)
             8'd0: data = 32'sh00000000; //        0 -> sin(0.0°)
@@ -346,134 +322,6 @@ module sine_rom_16_16 (
             8'd125: data = 32'sh00000FC2; //     4034 -> sin(176.47058823529412°)
             8'd126: data = 32'sh00000976; //     2422 -> sin(177.8823529411765°)
             8'd127: data = 32'sh00000327; //      807 -> sin(179.29411764705884°)
-            8'd128: data = 32'shFFFFFCD9; //     -807 -> sin(180.7058823529412°)
-            8'd129: data = 32'shFFFFF68A; //    -2422 -> sin(182.11764705882354°)
-            8'd130: data = 32'shFFFFF03E; //    -4034 -> sin(183.52941176470588°)
-            8'd131: data = 32'shFFFFE9F3; //    -5645 -> sin(184.94117647058826°)
-            8'd132: data = 32'shFFFFE3AC; //    -7252 -> sin(186.3529411764706°)
-            8'd133: data = 32'shFFFFDD6A; //    -8854 -> sin(187.76470588235296°)
-            8'd134: data = 32'shFFFFD72D; //   -10451 -> sin(189.1764705882353°)
-            8'd135: data = 32'shFFFFD0F6; //   -12042 -> sin(190.58823529411765°)
-            8'd136: data = 32'shFFFFCAC6; //   -13626 -> sin(192.0°)
-            8'd137: data = 32'shFFFFC49F; //   -15201 -> sin(193.41176470588238°)
-            8'd138: data = 32'shFFFFBE81; //   -16767 -> sin(194.82352941176472°)
-            8'd139: data = 32'shFFFFB86D; //   -18323 -> sin(196.23529411764707°)
-            8'd140: data = 32'shFFFFB265; //   -19867 -> sin(197.64705882352942°)
-            8'd141: data = 32'shFFFFAC68; //   -21400 -> sin(199.05882352941177°)
-            8'd142: data = 32'shFFFFA678; //   -22920 -> sin(200.47058823529414°)
-            8'd143: data = 32'shFFFFA097; //   -24425 -> sin(201.8823529411765°)
-            8'd144: data = 32'shFFFF9AC4; //   -25916 -> sin(203.29411764705884°)
-            8'd145: data = 32'shFFFF9501; //   -27391 -> sin(204.7058823529412°)
-            8'd146: data = 32'shFFFF8F4E; //   -28850 -> sin(206.11764705882354°)
-            8'd147: data = 32'shFFFF89AD; //   -30291 -> sin(207.52941176470588°)
-            8'd148: data = 32'shFFFF841E; //   -31714 -> sin(208.94117647058826°)
-            8'd149: data = 32'shFFFF7EA3; //   -33117 -> sin(210.3529411764706°)
-            8'd150: data = 32'shFFFF793C; //   -34500 -> sin(211.76470588235296°)
-            8'd151: data = 32'shFFFF73E9; //   -35863 -> sin(213.1764705882353°)
-            8'd152: data = 32'shFFFF6EAD; //   -37203 -> sin(214.58823529411765°)
-            8'd153: data = 32'shFFFF6987; //   -38521 -> sin(216.0°)
-            8'd154: data = 32'shFFFF6478; //   -39816 -> sin(217.41176470588238°)
-            8'd155: data = 32'shFFFF5F82; //   -41086 -> sin(218.82352941176472°)
-            8'd156: data = 32'shFFFF5AA4; //   -42332 -> sin(220.23529411764707°)
-            8'd157: data = 32'shFFFF55E1; //   -43551 -> sin(221.64705882352942°)
-            8'd158: data = 32'shFFFF5137; //   -44745 -> sin(223.05882352941177°)
-            8'd159: data = 32'shFFFF4CA9; //   -45911 -> sin(224.47058823529414°)
-            8'd160: data = 32'shFFFF4837; //   -47049 -> sin(225.8823529411765°)
-            8'd161: data = 32'shFFFF43E1; //   -48159 -> sin(227.29411764705884°)
-            8'd162: data = 32'shFFFF3FA9; //   -49239 -> sin(228.7058823529412°)
-            8'd163: data = 32'shFFFF3B8E; //   -50290 -> sin(230.11764705882354°)
-            8'd164: data = 32'shFFFF3792; //   -51310 -> sin(231.52941176470588°)
-            8'd165: data = 32'shFFFF33B5; //   -52299 -> sin(232.94117647058826°)
-            8'd166: data = 32'shFFFF2FF8; //   -53256 -> sin(234.3529411764706°)
-            8'd167: data = 32'shFFFF2C5B; //   -54181 -> sin(235.76470588235296°)
-            8'd168: data = 32'shFFFF28DF; //   -55073 -> sin(237.1764705882353°)
-            8'd169: data = 32'shFFFF2585; //   -55931 -> sin(238.58823529411765°)
-            8'd170: data = 32'shFFFF224C; //   -56756 -> sin(240.00000000000003°)
-            8'd171: data = 32'shFFFF1F36; //   -57546 -> sin(241.41176470588238°)
-            8'd172: data = 32'shFFFF1C43; //   -58301 -> sin(242.82352941176472°)
-            8'd173: data = 32'shFFFF1973; //   -59021 -> sin(244.23529411764707°)
-            8'd174: data = 32'shFFFF16C7; //   -59705 -> sin(245.64705882352942°)
-            8'd175: data = 32'shFFFF1440; //   -60352 -> sin(247.05882352941177°)
-            8'd176: data = 32'shFFFF11DC; //   -60964 -> sin(248.47058823529414°)
-            8'd177: data = 32'shFFFF0F9E; //   -61538 -> sin(249.8823529411765°)
-            8'd178: data = 32'shFFFF0D86; //   -62074 -> sin(251.29411764705884°)
-            8'd179: data = 32'shFFFF0B93; //   -62573 -> sin(252.7058823529412°)
-            8'd180: data = 32'shFFFF09C6; //   -63034 -> sin(254.11764705882354°)
-            8'd181: data = 32'shFFFF081F; //   -63457 -> sin(255.5294117647059°)
-            8'd182: data = 32'shFFFF069F; //   -63841 -> sin(256.94117647058823°)
-            8'd183: data = 32'shFFFF0545; //   -64187 -> sin(258.3529411764706°)
-            8'd184: data = 32'shFFFF0413; //   -64493 -> sin(259.764705882353°)
-            8'd185: data = 32'shFFFF0308; //   -64760 -> sin(261.1764705882353°)
-            8'd186: data = 32'shFFFF0224; //   -64988 -> sin(262.5882352941177°)
-            8'd187: data = 32'shFFFF0167; //   -65177 -> sin(264.0°)
-            8'd188: data = 32'shFFFF00D2; //   -65326 -> sin(265.4117647058824°)
-            8'd189: data = 32'shFFFF0065; //   -65435 -> sin(266.8235294117647°)
-            8'd190: data = 32'shFFFF001F; //   -65505 -> sin(268.2352941176471°)
-            8'd191: data = 32'shFFFF0001; //   -65535 -> sin(269.64705882352945°)
-            8'd192: data = 32'shFFFF000B; //   -65525 -> sin(271.05882352941177°)
-            8'd193: data = 32'shFFFF003D; //   -65475 -> sin(272.47058823529414°)
-            8'd194: data = 32'shFFFF0096; //   -65386 -> sin(273.88235294117646°)
-            8'd195: data = 32'shFFFF0118; //   -65256 -> sin(275.29411764705884°)
-            8'd196: data = 32'shFFFF01C0; //   -65088 -> sin(276.7058823529412°)
-            8'd197: data = 32'shFFFF0291; //   -64879 -> sin(278.11764705882354°)
-            8'd198: data = 32'shFFFF0388; //   -64632 -> sin(279.5294117647059°)
-            8'd199: data = 32'shFFFF04A7; //   -64345 -> sin(280.94117647058823°)
-            8'd200: data = 32'shFFFF05ED; //   -64019 -> sin(282.3529411764706°)
-            8'd201: data = 32'shFFFF075A; //   -63654 -> sin(283.764705882353°)
-            8'd202: data = 32'shFFFF08EE; //   -63250 -> sin(285.1764705882353°)
-            8'd203: data = 32'shFFFF0AA8; //   -62808 -> sin(286.5882352941177°)
-            8'd204: data = 32'shFFFF0C88; //   -62328 -> sin(288.0°)
-            8'd205: data = 32'shFFFF0E8D; //   -61811 -> sin(289.4117647058824°)
-            8'd206: data = 32'shFFFF10B9; //   -61255 -> sin(290.82352941176475°)
-            8'd207: data = 32'shFFFF1309; //   -60663 -> sin(292.2352941176471°)
-            8'd208: data = 32'shFFFF157F; //   -60033 -> sin(293.64705882352945°)
-            8'd209: data = 32'shFFFF1819; //   -59367 -> sin(295.05882352941177°)
-            8'd210: data = 32'shFFFF1AD7; //   -58665 -> sin(296.47058823529414°)
-            8'd211: data = 32'shFFFF1DB8; //   -57928 -> sin(297.88235294117646°)
-            8'd212: data = 32'shFFFF20BD; //   -57155 -> sin(299.29411764705884°)
-            8'd213: data = 32'shFFFF23E4; //   -56348 -> sin(300.7058823529412°)
-            8'd214: data = 32'shFFFF272E; //   -55506 -> sin(302.11764705882354°)
-            8'd215: data = 32'shFFFF2A99; //   -54631 -> sin(303.5294117647059°)
-            8'd216: data = 32'shFFFF2E25; //   -53723 -> sin(304.94117647058823°)
-            8'd217: data = 32'shFFFF31D3; //   -52781 -> sin(306.3529411764706°)
-            8'd218: data = 32'shFFFF35A0; //   -51808 -> sin(307.764705882353°)
-            8'd219: data = 32'shFFFF398C; //   -50804 -> sin(309.1764705882353°)
-            8'd220: data = 32'shFFFF3D98; //   -49768 -> sin(310.5882352941177°)
-            8'd221: data = 32'shFFFF41C1; //   -48703 -> sin(312.0°)
-            8'd222: data = 32'shFFFF4608; //   -47608 -> sin(313.4117647058824°)
-            8'd223: data = 32'shFFFF4A6D; //   -46483 -> sin(314.82352941176475°)
-            8'd224: data = 32'shFFFF4EED; //   -45331 -> sin(316.2352941176471°)
-            8'd225: data = 32'shFFFF5389; //   -44151 -> sin(317.64705882352945°)
-            8'd226: data = 32'shFFFF583F; //   -42945 -> sin(319.05882352941177°)
-            8'd227: data = 32'shFFFF5D10; //   -41712 -> sin(320.47058823529414°)
-            8'd228: data = 32'shFFFF61FA; //   -40454 -> sin(321.88235294117646°)
-            8'd229: data = 32'shFFFF66FD; //   -39171 -> sin(323.29411764705884°)
-            8'd230: data = 32'shFFFF6C17; //   -37865 -> sin(324.7058823529412°)
-            8'd231: data = 32'shFFFF7148; //   -36536 -> sin(326.11764705882354°)
-            8'd232: data = 32'shFFFF7690; //   -35184 -> sin(327.5294117647059°)
-            8'd233: data = 32'shFFFF7BED; //   -33811 -> sin(328.94117647058823°)
-            8'd234: data = 32'shFFFF815E; //   -32418 -> sin(330.3529411764706°)
-            8'd235: data = 32'shFFFF86E3; //   -31005 -> sin(331.764705882353°)
-            8'd236: data = 32'shFFFF8C7B; //   -29573 -> sin(333.1764705882353°)
-            8'd237: data = 32'shFFFF9225; //   -28123 -> sin(334.5882352941177°)
-            8'd238: data = 32'shFFFF97E0; //   -26656 -> sin(336.0°)
-            8'd239: data = 32'shFFFF9DAB; //   -25173 -> sin(337.4117647058824°)
-            8'd240: data = 32'shFFFFA386; //   -23674 -> sin(338.82352941176475°)
-            8'd241: data = 32'shFFFFA96E; //   -22162 -> sin(340.2352941176471°)
-            8'd242: data = 32'shFFFFAF65; //   -20635 -> sin(341.64705882352945°)
-            8'd243: data = 32'shFFFFB567; //   -19097 -> sin(343.05882352941177°)
-            8'd244: data = 32'shFFFFBB76; //   -17546 -> sin(344.47058823529414°)
-            8'd245: data = 32'shFFFFC18F; //   -15985 -> sin(345.8823529411765°)
-            8'd246: data = 32'shFFFFC7B2; //   -14414 -> sin(347.29411764705884°)
-            8'd247: data = 32'shFFFFCDDD; //   -12835 -> sin(348.7058823529412°)
-            8'd248: data = 32'shFFFFD410; //   -11248 -> sin(350.11764705882354°)
-            8'd249: data = 32'shFFFFDA4A; //    -9654 -> sin(351.5294117647059°)
-            8'd250: data = 32'shFFFFE08A; //    -8054 -> sin(352.94117647058823°)
-            8'd251: data = 32'shFFFFE6CF; //    -6449 -> sin(354.3529411764706°)
-            8'd252: data = 32'shFFFFED18; //    -4840 -> sin(355.764705882353°)
-            8'd253: data = 32'shFFFFF364; //    -3228 -> sin(357.1764705882353°)
-            8'd254: data = 32'shFFFFF9B1; //    -1615 -> sin(358.5882352941177°)
-            8'd255: data = 32'sh00000000; //        0 -> sin(360.0°)
             default: data = 32'sh00000000;
         endcase
     end
