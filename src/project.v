@@ -177,7 +177,7 @@ endmodule
 
 module sine_rom_16_16 (
     input  wire [7:0] addr,       
-    output reg  signed [31:0] data
+    output wire  signed [31:0] data
 );
   wire signed [31:0] half_data;
   sine_rom_16_16_half sin_lut (
